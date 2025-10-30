@@ -40,6 +40,13 @@
             width: 112px;
             height: 112px;
             pointer-events: auto;
+            display: block;
+            cursor: pointer;
+            transition: transform 0.2s ease;
+        }
+
+        #site-logo:hover {
+            transform: scale(1.05);
         }
 
         #site-logo img {
@@ -529,9 +536,9 @@
     <div id="error-banner"></div>
 
     <!-- Site Logo -->
-    <div id="site-logo">
+    <a id="site-logo" href="https://sites.google.com/reitaku.jp/reiryosai2023/" target="_blank" rel="noopener noreferrer">
         <img src="images/mascot.png" alt="Site Logo">
-    </div>
+    </a>
 
     <!-- Top Controls -->
     <div id="top-controls">

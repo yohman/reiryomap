@@ -139,12 +139,34 @@ function createCategoryButtons() {
     allBtn.addEventListener('click', () => toggleCategory('all', allBtn));
     container.appendChild(allBtn);
 
-    // Add category buttons for categories present in data
+    // Define the fixed order for categories
+    const categoryOrder = [
+        'お笑い芸人',
+        '一日目',
+        '二日目',
+        '屋外出店',
+        '屋内出店',
+        '展示'
+    ];
+
+    // Add category buttons in the specified order (only if present in data)
+    categoryOrder.forEach(category => {
+        if (categoriesInData.has(category)) {
+            const config = CATEGORIES[category] || { color: DEFAULT_COLOR, label: category };
+            const btn = createButton(category, config.color);
+            btn.addEventListener('click', () => toggleCategory(category, btn));
+            container.appendChild(btn);
+        }
+    });
+
+    // Add any remaining categories not in the predefined order
     categoriesInData.forEach(category => {
-        const config = CATEGORIES[category] || { color: DEFAULT_COLOR, label: category };
-        const btn = createButton(category, config.color);
-        btn.addEventListener('click', () => toggleCategory(category, btn));
-        container.appendChild(btn);
+        if (!categoryOrder.includes(category)) {
+            const config = CATEGORIES[category] || { color: DEFAULT_COLOR, label: category };
+            const btn = createButton(category, config.color);
+            btn.addEventListener('click', () => toggleCategory(category, btn));
+            container.appendChild(btn);
+        }
     });
 }
 
@@ -198,7 +220,7 @@ function toggleCategory(category, button) {
 
 // Filter data based on active filters
 function getFilteredData() {
-    return allData.filter(item => {
+    const filtered = allData.filter(item => {
         const category = (item.category || "場所").trim();
         const title = (item.title || "").toLowerCase();
         const location = (item.location || "").toLowerCase();
@@ -214,6 +236,45 @@ function getFilteredData() {
             explanation.includes(searchQuery);
 
         return categoryMatch && searchMatch;
+    });
+    
+    // Sort by category, then date, then startTime, then endTime
+    return filtered.sort((a, b) => {
+        // First compare categories
+        const categoryA = (a.category || "場所").trim();
+        const categoryB = (b.category || "場所").trim();
+        
+        if (categoryA !== categoryB) {
+            return categoryA.localeCompare(categoryB);
+        }
+        
+        // If categories are equal, compare dates - items without date should come last
+        const dateA = a.date || '';
+        const dateB = b.date || '';
+        
+        if (!dateA && dateB) return 1;  // a has no date, put it after b
+        if (dateA && !dateB) return -1; // b has no date, put it after a
+        
+        if (dateA !== dateB) {
+            return dateA.localeCompare(dateB);
+        }
+        
+        // If dates are equal, compare start times
+        const startA = a.startTime || '';
+        const startB = b.startTime || '';
+        if (startA !== startB) {
+            return startA.localeCompare(startB);
+        }
+        
+        // If start times are equal, compare end times
+        // Items without end time should come last
+        const endA = a.endTime || '';
+        const endB = b.endTime || '';
+        
+        if (!endA && endB) return 1;  // a has no end time, put it after b
+        if (endA && !endB) return -1; // b has no end time, put it after a
+        
+        return endA.localeCompare(endB);
     });
 }
 
@@ -340,9 +401,37 @@ function updatePanelWithItems(items) {
         html += `<div class="panel-item-title">${escapeHtml(item.title || '無題')}</div>`;
         html += `<div class="panel-item-category" style="background-color: ${color}">${escapeHtml(category)}</div>`;
         
-        if (item.location) {
-            html += `<div class="panel-item-location">📍 ${escapeHtml(item.location)}</div>`;
+        // Location handling (sunny and rainy)
+        if (item.building || item.location) {
+            const buildingPart = item.building ? escapeHtml(item.building) : '';
+            const locationPart = item.location ? escapeHtml(item.location) : '';
+            const fullLocation = [buildingPart, locationPart].filter(Boolean).join(' ');
+            
+            const sunnyLocation = [item.building, item.location].filter(Boolean).join(' ');
+            const rainyLocation = [item.rain_building, item.rain_location].filter(Boolean).join(' ');
+            
+            // If rainy location exists and is the same, show both emojis
+            if (rainyLocation && rainyLocation === sunnyLocation) {
+                html += `<div class="panel-item-location">☀️🌧️ ${fullLocation}</div>`;
+            } else {
+                html += `<div class="panel-item-location">☀️ ${fullLocation}</div>`;
+            }
         }
+        
+        // Rainy day location (only show separately if different from sunny location)
+        if (item.rain_building || item.rain_location) {
+            const rainBuildingPart = item.rain_building ? escapeHtml(item.rain_building) : '';
+            const rainLocationPart = item.rain_location ? escapeHtml(item.rain_location) : '';
+            const fullRainLocation = [rainBuildingPart, rainLocationPart].filter(Boolean).join(' ');
+            
+            const sunnyLocation = [item.building, item.location].filter(Boolean).join(' ');
+            const rainyLocation = [item.rain_building, item.rain_location].filter(Boolean).join(' ');
+            
+            if (rainyLocation && rainyLocation !== sunnyLocation) {
+                html += `<div class="panel-item-location">🌧️ ${fullRainLocation}</div>`;
+            }
+        }
+        
         if (item.date) {
             html += `<div class="panel-item-location">📅 ${escapeHtml(item.date)}</div>`;
         }
@@ -421,9 +510,37 @@ function updateSidePanel(data) {
         html += `<div class="panel-item-title">${escapeHtml(item.title || '無題')}</div>`;
         html += `<div class="panel-item-category" style="background-color: ${color}">${escapeHtml(category)}</div>`;
         
-        if (item.location) {
-            html += `<div class="panel-item-location">📍 ${escapeHtml(item.location)}</div>`;
+        // Location handling (sunny and rainy)
+        if (item.building || item.location) {
+            const buildingPart = item.building ? escapeHtml(item.building) : '';
+            const locationPart = item.location ? escapeHtml(item.location) : '';
+            const fullLocation = [buildingPart, locationPart].filter(Boolean).join(' ');
+            
+            const sunnyLocation = [item.building, item.location].filter(Boolean).join(' ');
+            const rainyLocation = [item.rain_building, item.rain_location].filter(Boolean).join(' ');
+            
+            // If rainy location exists and is the same, show both emojis
+            if (rainyLocation && rainyLocation === sunnyLocation) {
+                html += `<div class="panel-item-location">☀️🌧️ ${fullLocation}</div>`;
+            } else {
+                html += `<div class="panel-item-location">☀️ ${fullLocation}</div>`;
+            }
         }
+        
+        // Rainy day location (only show separately if different from sunny location)
+        if (item.rain_building || item.rain_location) {
+            const rainBuildingPart = item.rain_building ? escapeHtml(item.rain_building) : '';
+            const rainLocationPart = item.rain_location ? escapeHtml(item.rain_location) : '';
+            const fullRainLocation = [rainBuildingPart, rainLocationPart].filter(Boolean).join(' ');
+            
+            const sunnyLocation = [item.building, item.location].filter(Boolean).join(' ');
+            const rainyLocation = [item.rain_building, item.rain_location].filter(Boolean).join(' ');
+            
+            if (rainyLocation && rainyLocation !== sunnyLocation) {
+                html += `<div class="panel-item-location">🌧️ ${fullRainLocation}</div>`;
+            }
+        }
+        
         if (item.date) {
             html += `<div class="panel-item-location">📅 ${escapeHtml(item.date)}</div>`;
         }
