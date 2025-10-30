@@ -1,0 +1,594 @@
+// map2.js - Clean implementation of Reitaku University Map
+
+// Configuration
+const CONFIG = {
+    center: [139.955303, 35.833707], // Reitaku University
+    zoom: 16,
+    watercolorBounds: {
+        UL: [139.948711, 35.836212],
+        UR: [139.961172, 35.836212],
+        LR: [139.961172, 35.829474],
+        LL: [139.948711, 35.829474]
+    }
+};
+
+// Category configuration with colors
+const CATEGORIES = {
+    "イベント": { color: "#e74c3c", label: "Events" },
+    "体験": { color: "#f1c40f", label: "Activities" },
+    "展示": { color: "#3498db", label: "Exhibitions" },
+    "食べ物": { color: "#ff9800", label: "Food" },
+    "場所": { color: "#43c59e", label: "Places" },
+    "交通": { color: "#9b59b6", label: "Transport" },
+    "ライブ": { color: "#e91e63", label: "Live Shows" }
+};
+
+const DEFAULT_COLOR = "#43c59e";
+
+// Global state
+let map = null;
+let markers = [];
+let allData = [];
+let activeCategories = new Set();
+let searchQuery = "";
+
+// Initialize map when data is loaded
+window.initmap = function() {
+    console.log("Initializing map with data:", window.dataObject);
+    
+    if (!window.dataObject || window.dataObject.length === 0) {
+        showError("No data available. Please check the data source.");
+        hideLoading();
+        return;
+    }
+
+    allData = window.dataObject;
+    initializeMap();
+    createCategoryButtons();
+    setupEventListeners();
+    
+    // Render markers after map loads to ensure proper bounds calculation
+    if (map.loaded()) {
+        renderMarkersAndPanel();
+    } else {
+        map.on('load', () => {
+            renderMarkersAndPanel();
+        });
+    }
+    
+    hideLoading();
+};
+
+// Initialize MapLibre map
+function initializeMap() {
+    map = new maplibregl.Map({
+        container: 'map',
+        style: {
+            version: 8,
+            sources: {
+                "satellite": {
+                    type: "raster",
+                    tiles: ["https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}"],
+                    tileSize: 256,
+                    attribution: "© Google",
+                    maxzoom: 21
+                }
+            },
+            layers: [
+                {
+                    id: "satellite-layer",
+                    type: "raster",
+                    source: "satellite"
+                }
+            ]
+        },
+        center: CONFIG.center,
+        zoom: CONFIG.zoom
+    });
+
+    // Add watercolor overlay when map loads
+    let mapLoaded = false;
+    map.on('load', () => {
+        if (!mapLoaded) {
+            mapLoaded = true;
+            addWatercolorOverlay();
+            // Satellite layer stays visible as the base
+        }
+    });
+
+    // Navigation controls removed per user request
+}
+
+// Add watercolor basemap overlay
+function addWatercolorOverlay() {
+    const bounds = CONFIG.watercolorBounds;
+    
+    if (!map.getSource('watercolor-overlay')) {
+        map.addSource('watercolor-overlay', {
+            type: 'image',
+            url: 'images/watercolorbasemap.png',
+            coordinates: [bounds.UL, bounds.UR, bounds.LR, bounds.LL]
+        });
+        
+        map.addLayer({
+            id: 'watercolor-overlay-layer',
+            type: 'raster',
+            source: 'watercolor-overlay',
+            paint: {
+                'raster-opacity': 1
+            }
+        });
+    }
+}
+
+// Create category filter buttons
+function createCategoryButtons() {
+    const container = document.getElementById('category-buttons');
+    container.innerHTML = '';
+
+    // Get unique categories from data
+    const categoriesInData = new Set();
+    allData.forEach(item => {
+        const cat = (item.category || "場所").trim();
+        categoriesInData.add(cat);
+    });
+
+    // Add "All" button
+    const allBtn = createButton('All', '#333');
+    allBtn.classList.add('active');
+    allBtn.addEventListener('click', () => toggleCategory('all', allBtn));
+    container.appendChild(allBtn);
+
+    // Add category buttons for categories present in data
+    categoriesInData.forEach(category => {
+        const config = CATEGORIES[category] || { color: DEFAULT_COLOR, label: category };
+        const btn = createButton(category, config.color);
+        btn.addEventListener('click', () => toggleCategory(category, btn));
+        container.appendChild(btn);
+    });
+}
+
+// Create a styled button
+function createButton(text, color) {
+    const btn = document.createElement('button');
+    btn.className = 'category-btn';
+    btn.textContent = text;
+    btn.dataset.categoryColor = color;
+    if (text === 'All') {
+        btn.style.setProperty('--btn-color', color);
+    } else {
+        btn.style.setProperty('--btn-color', color);
+    }
+    btn.dataset.category = text;
+    return btn;
+}
+
+// Toggle category filter - only one category at a time
+function toggleCategory(category, button) {
+    const allButtons = document.querySelectorAll('.category-btn');
+    
+    if (category === 'all') {
+        // Show all categories
+        activeCategories.clear();
+        allButtons.forEach(btn => {
+            if (btn.dataset.category === 'All') {
+                btn.classList.add('active');
+            } else {
+                btn.classList.remove('active');
+            }
+        });
+    } else {
+        // Deactivate all buttons first
+        allButtons.forEach(btn => btn.classList.remove('active'));
+        
+        // If clicking the same category that was active, go back to "All"
+        if (activeCategories.has(category)) {
+            activeCategories.clear();
+            document.querySelector('[data-category="All"]').classList.add('active');
+        } else {
+            // Activate only this category
+            activeCategories.clear();
+            activeCategories.add(category);
+            button.classList.add('active');
+        }
+    }
+
+    renderMarkersAndPanel();
+}
+
+// Filter data based on active filters
+function getFilteredData() {
+    return allData.filter(item => {
+        const category = (item.category || "場所").trim();
+        const title = (item.title || "").toLowerCase();
+        const location = (item.location || "").toLowerCase();
+        const explanation = (item.explanation || "").toLowerCase();
+
+        // Category filter
+        const categoryMatch = activeCategories.size === 0 || activeCategories.has(category);
+
+        // Search filter
+        const searchMatch = !searchQuery || 
+            title.includes(searchQuery) ||
+            location.includes(searchQuery) ||
+            explanation.includes(searchQuery);
+
+        return categoryMatch && searchMatch;
+    });
+}
+
+// Group data by coordinates
+function groupByCoordinates(data) {
+    const groups = new Map();
+    
+    data.forEach(item => {
+        const key = `${item.lat.toFixed(6)},${item.lon.toFixed(6)}`;
+        if (!groups.has(key)) {
+            groups.set(key, []);
+        }
+        groups.get(key).push(item);
+    });
+
+    return groups;
+}
+
+// Render markers on map and update side panel
+function renderMarkersAndPanel() {
+    // Clear existing markers
+    markers.forEach(marker => marker.remove());
+    markers = [];
+
+    const filteredData = getFilteredData();
+    const groupedData = groupByCoordinates(filteredData);
+
+    // Create markers for each location
+    groupedData.forEach((items, key) => {
+        const [lat, lon] = key.split(',').map(Number);
+        const count = items.length;
+        
+        // Get the primary category (most common in the group)
+        const categories = items.map(item => (item.category || "場所").trim());
+        const primaryCategory = getMostCommon(categories);
+        const color = CATEGORIES[primaryCategory]?.color || DEFAULT_COLOR;
+
+        // Create marker element
+        const el = document.createElement('div');
+        el.className = 'custom-marker';
+        el.style.backgroundColor = color;
+        el.textContent = count;
+        el.title = `${count} location${count > 1 ? 's' : ''}`;
+
+        // Create marker
+        const marker = new maplibregl.Marker({ element: el })
+            .setLngLat([lon, lat])
+            .addTo(map);
+
+        // Click handler to update panel with items at this location
+        el.addEventListener('click', () => {
+            updatePanelWithItems(items);
+            map.flyTo({
+                center: [lon, lat],
+                zoom: 18,
+                duration: 1000
+            });
+        });
+
+        markers.push(marker);
+    });
+
+    // Update side panel
+    updateSidePanel(filteredData);
+    
+    // Zoom to fit all visible markers
+    fitMapToMarkers(filteredData);
+}
+
+// Fit map bounds to show all filtered markers
+function fitMapToMarkers(data) {
+    if (!data || data.length === 0) return;
+    
+    // Calculate bounds of all markers
+    const bounds = new maplibregl.LngLatBounds();
+    
+    data.forEach(item => {
+        bounds.extend([item.lon, item.lat]);
+    });
+    
+    // Responsive padding based on screen size
+    const isMobile = window.innerWidth <= 768;
+    const padding = isMobile 
+        ? { top: 200, bottom: window.innerHeight * 0.35, left: 20, right: 20 } // Mobile: account for panel at bottom (30% + buffer)
+        : { top: 180, bottom: 100, left: 100, right: 450 }; // Desktop: account for side panel and category buttons
+    
+    // Fit map to bounds with padding
+    map.fitBounds(bounds, {
+        padding: padding,
+        maxZoom: 18,
+        duration: 1000
+    });
+}
+
+// Update panel to show only items at clicked location
+function updatePanelWithItems(items) {
+    const content = document.getElementById('panel-content');
+    const count = document.getElementById('panel-count');
+    
+    count.textContent = `${items.length} location${items.length !== 1 ? 's' : ''} at this marker`;
+    content.innerHTML = '';
+
+    items.forEach(item => {
+        const category = (item.category || "場所").trim();
+        const color = CATEGORIES[category]?.color || DEFAULT_COLOR;
+
+        const itemEl = document.createElement('div');
+        itemEl.className = 'panel-item';
+        itemEl.style.borderLeftColor = color;
+        itemEl.style.background = 'rgba(227, 242, 253, 0.95)';
+        itemEl.style.backdropFilter = 'blur(10px)';
+
+        let html = '';
+        
+        // Add thumbnail if image exists
+        if (item.imageUrl || item.image) {
+            const imagePath = item.imageUrl || item.image;
+            // Check if path already includes 'icons/', if not, prepend it
+            const fullImagePath = imagePath.includes('icons/') ? imagePath : `icons/${imagePath}`;
+            html += `<img src="${escapeHtml(fullImagePath)}" alt="" class="panel-item-thumbnail" onerror="this.style.display='none'">`;
+        }
+        
+        html += `<div class="panel-item-content">`;
+        html += `<div class="panel-item-title">${escapeHtml(item.title || 'Untitled')}</div>`;
+        html += `<div class="panel-item-category" style="background-color: ${color}">${escapeHtml(category)}</div>`;
+        
+        if (item.location) {
+            html += `<div class="panel-item-location">📍 ${escapeHtml(item.location)}</div>`;
+        }
+        if (item.date) {
+            html += `<div class="panel-item-location">📅 ${escapeHtml(item.date)}</div>`;
+        }
+        if (item.startTime || item.endTime) {
+            html += `<div class="panel-item-location">⏰ ${escapeHtml(item.startTime || '')} - ${escapeHtml(item.endTime || '')}</div>`;
+        }
+        if (item.explanation) {
+            html += `<div class="panel-item-location" style="margin-top: 8px; white-space: pre-wrap;">${escapeHtml(item.explanation)}</div>`;
+        }
+        html += `</div>`;
+
+        itemEl.innerHTML = html;
+        content.appendChild(itemEl);
+    });
+}
+
+// Update side panel with filtered data
+function updateSidePanel(data) {
+    const content = document.getElementById('panel-content');
+    const count = document.getElementById('panel-count');
+    
+    count.textContent = `${data.length} location${data.length !== 1 ? 's' : ''} found`;
+    content.innerHTML = '';
+
+    if (data.length === 0) {
+        content.innerHTML = '<p style="text-align: center; color: #999; padding: 20px;">No locations found</p>';
+        return;
+    }
+
+    data.forEach(item => {
+        const category = (item.category || "場所").trim();
+        const color = CATEGORIES[category]?.color || DEFAULT_COLOR;
+
+        const itemEl = document.createElement('div');
+        itemEl.className = 'panel-item';
+        itemEl.style.borderLeftColor = color;
+        itemEl.dataset.lat = item.lat;
+        itemEl.dataset.lon = item.lon;
+
+        let html = '';
+        
+        // Add thumbnail if image exists
+        if (item.imageUrl || item.image) {
+            const imagePath = item.imageUrl || item.image;
+            // Check if path already includes 'icons/', if not, prepend it
+            const fullImagePath = imagePath.includes('icons/') ? imagePath : `icons/${imagePath}`;
+            html += `<img src="${escapeHtml(fullImagePath)}" alt="" class="panel-item-thumbnail" onerror="this.style.display='none'">`;
+        }
+        
+        html += `<div class="panel-item-content">`;
+        html += `<div class="panel-item-title">${escapeHtml(item.title || 'Untitled')}</div>`;
+        html += `<div class="panel-item-category" style="background-color: ${color}">${escapeHtml(category)}</div>`;
+        
+        if (item.location) {
+            html += `<div class="panel-item-location">📍 ${escapeHtml(item.location)}</div>`;
+        }
+        if (item.date) {
+            html += `<div class="panel-item-location">📅 ${escapeHtml(item.date)}</div>`;
+        }
+        if (item.startTime || item.endTime) {
+            html += `<div class="panel-item-location">⏰ ${escapeHtml(item.startTime || '')} - ${escapeHtml(item.endTime || '')}</div>`;
+        }
+        if (item.explanation) {
+            html += `<div class="panel-item-location" style="margin-top: 8px; white-space: pre-wrap;">${escapeHtml(item.explanation)}</div>`;
+        }
+        html += `</div>`;
+
+        itemEl.innerHTML = html;
+
+        // Click to fly to location and update panel
+        itemEl.addEventListener('click', () => {
+            map.flyTo({
+                center: [item.lon, item.lat],
+                zoom: 18,
+                duration: 1000
+            });
+
+            // Find items at this location and update panel
+            const filteredData = getFilteredData();
+            const itemsAtLocation = filteredData.filter(d => 
+                Math.abs(d.lat - item.lat) < 0.00001 && 
+                Math.abs(d.lon - item.lon) < 0.00001
+            );
+            
+            if (itemsAtLocation.length > 0) {
+                updatePanelWithItems(itemsAtLocation);
+            }
+        });
+
+        content.appendChild(itemEl);
+    });
+}
+
+// Setup event listeners
+function setupEventListeners() {
+    // Search input
+    const searchInput = document.getElementById('search-input');
+    searchInput.addEventListener('input', (e) => {
+        searchQuery = e.target.value.toLowerCase();
+        renderMarkersAndPanel();
+    });
+
+    // Basemap toggle
+    const basemapButtons = document.querySelectorAll('.basemap-btn');
+    basemapButtons.forEach(btn => {
+        btn.addEventListener('click', () => {
+            const basemap = btn.dataset.basemap;
+            switchBasemap(basemap);
+            
+            // Update active state
+            basemapButtons.forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+        });
+    });
+
+    // Mobile panel drag functionality
+    setupMobilePanelDrag();
+}
+
+// Setup draggable panel for mobile
+function setupMobilePanelDrag() {
+    const panel = document.getElementById('side-panel');
+    const handle = document.getElementById('panel-drag-handle');
+    const panelHeader = document.getElementById('panel-header');
+    
+    if (!handle) return;
+
+    let startY = 0;
+    let startHeight = 0;
+    let isDragging = false;
+
+    const startDrag = (e) => {
+        if (window.innerWidth > 768) return; // Only on mobile
+        
+        isDragging = true;
+        startY = e.type.includes('touch') ? e.touches[0].clientY : e.clientY;
+        startHeight = panel.offsetHeight;
+        
+        document.body.style.userSelect = 'none';
+        panel.style.transition = 'none';
+    };
+
+    const doDrag = (e) => {
+        if (!isDragging) return;
+        
+        const currentY = e.type.includes('touch') ? e.touches[0].clientY : e.clientY;
+        const deltaY = startY - currentY; // Positive when dragging up
+        const newHeight = startHeight + deltaY;
+        const windowHeight = window.innerHeight;
+        
+        // Constrain between 20% and 100%
+        const minHeight = windowHeight * 0.2;
+        const maxHeight = windowHeight;
+        
+        if (newHeight >= minHeight && newHeight <= maxHeight) {
+            panel.style.height = `${newHeight}px`;
+        }
+    };
+
+    const endDrag = () => {
+        if (!isDragging) return;
+        
+        isDragging = false;
+        document.body.style.userSelect = '';
+        panel.style.transition = 'height 0.3s ease';
+        
+        const currentHeight = panel.offsetHeight;
+        const windowHeight = window.innerHeight;
+        
+        // Snap to 30% or 100% based on threshold
+        if (currentHeight > windowHeight * 0.6) {
+            panel.classList.add('expanded');
+            panel.style.height = '100%';
+        } else {
+            panel.classList.remove('expanded');
+            panel.style.height = '30%';
+        }
+    };
+
+    // Mouse events
+    handle.addEventListener('mousedown', startDrag);
+    panelHeader.addEventListener('mousedown', startDrag);
+    document.addEventListener('mousemove', doDrag);
+    document.addEventListener('mouseup', endDrag);
+
+    // Touch events
+    handle.addEventListener('touchstart', startDrag, { passive: true });
+    panelHeader.addEventListener('touchstart', startDrag, { passive: true });
+    document.addEventListener('touchmove', doDrag, { passive: false });
+    document.addEventListener('touchend', endDrag);
+}
+
+// Switch basemap - toggle watercolor overlay on/off (satellite always visible)
+function switchBasemap(basemap) {
+    if (!map.getLayer('watercolor-overlay-layer')) return;
+
+    if (basemap === 'watercolor') {
+        // Show watercolor overlay on top of satellite
+        map.setPaintProperty('watercolor-overlay-layer', 'raster-opacity', 1);
+    } else {
+        // Hide watercolor overlay, show only satellite
+        map.setPaintProperty('watercolor-overlay-layer', 'raster-opacity', 0);
+    }
+}
+
+// Utility functions
+function getMostCommon(arr) {
+    const counts = {};
+    arr.forEach(item => {
+        counts[item] = (counts[item] || 0) + 1;
+    });
+    
+    let maxCount = 0;
+    let mostCommon = arr[0];
+    
+    for (const item in counts) {
+        if (counts[item] > maxCount) {
+            maxCount = counts[item];
+            mostCommon = item;
+        }
+    }
+    
+    return mostCommon;
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+function hideLoading() {
+    const loading = document.getElementById('loading');
+    if (loading) loading.classList.add('hidden');
+}
+
+function showError(message) {
+    const banner = document.getElementById('error-banner');
+    if (banner) {
+        banner.textContent = message;
+        banner.classList.add('show');
+        setTimeout(() => banner.classList.remove('show'), 5000);
+    }
+}
+
+// Initialize when data is ready
+if (window.dataObject && window.dataObject.length > 0) {
+    window.initmap();
+}
