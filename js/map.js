@@ -141,7 +141,7 @@ function createCategoryButtons() {
 
     // Define the fixed order for categories
     const categoryOrder = [
-        'お笑い芸人',
+        'ゲストイベント',
         '一日目',
         '二日目',
         '屋外出店',
