@@ -134,7 +134,7 @@ function createCategoryButtons() {
     });
 
     // Add "All" button
-    const allBtn = createButton('All', '#333');
+    const allBtn = createButton('すべて', '#333');
     allBtn.classList.add('active');
     allBtn.addEventListener('click', () => toggleCategory('all', allBtn));
     container.appendChild(allBtn);
@@ -154,7 +154,7 @@ function createButton(text, color) {
     btn.className = 'category-btn';
     btn.textContent = text;
     btn.dataset.categoryColor = color;
-    if (text === 'All') {
+    if (text === 'すべて') {
         btn.style.setProperty('--btn-color', color);
     } else {
         btn.style.setProperty('--btn-color', color);
@@ -256,7 +256,7 @@ function renderMarkersAndPanel() {
         el.className = 'custom-marker';
         el.style.backgroundColor = color;
         el.textContent = count;
-        el.title = `${count} location${count > 1 ? 's' : ''}`;
+        el.title = `${count}件の場所`;
 
         // Create marker
         const marker = new maplibregl.Marker({ element: el })
@@ -313,7 +313,7 @@ function updatePanelWithItems(items) {
     const content = document.getElementById('panel-content');
     const count = document.getElementById('panel-count');
     
-    count.textContent = `${items.length} location${items.length !== 1 ? 's' : ''} at this marker`;
+    count.textContent = `このマーカーに${items.length}件の場所`;
     content.innerHTML = '';
 
     items.forEach(item => {
@@ -337,7 +337,7 @@ function updatePanelWithItems(items) {
         }
         
         html += `<div class="panel-item-content">`;
-        html += `<div class="panel-item-title">${escapeHtml(item.title || 'Untitled')}</div>`;
+        html += `<div class="panel-item-title">${escapeHtml(item.title || '無題')}</div>`;
         html += `<div class="panel-item-category" style="background-color: ${color}">${escapeHtml(category)}</div>`;
         
         if (item.location) {
@@ -355,6 +355,31 @@ function updatePanelWithItems(items) {
         html += `</div>`;
 
         itemEl.innerHTML = html;
+
+        // Add click handler to minimize panel and center map in mobile mode
+        itemEl.addEventListener('click', () => {
+            const panel = document.getElementById('side-panel');
+            const panelContent = document.getElementById('panel-content');
+            const isMobile = window.innerWidth <= 768;
+            if (isMobile && panel.classList.contains('expanded')) {
+                panel.classList.remove('expanded');
+                panel.style.height = '30%';
+                
+                // Scroll the clicked item into view in the minimized panel
+                setTimeout(() => {
+                    const itemOffsetTop = itemEl.offsetTop;
+                    panelContent.scrollTo({ top: itemOffsetTop, behavior: 'smooth' });
+                }, 350); // Wait for panel transition to complete
+            }
+
+            // Center map to the clicked item's location
+            map.flyTo({
+                center: [item.lon, item.lat],
+                zoom: 18,
+                duration: 1000
+            });
+        });
+
         content.appendChild(itemEl);
     });
 }
@@ -364,11 +389,11 @@ function updateSidePanel(data) {
     const content = document.getElementById('panel-content');
     const count = document.getElementById('panel-count');
     
-    count.textContent = `${data.length} location${data.length !== 1 ? 's' : ''} found`;
+    count.textContent = `${data.length}件の場所が見つかりました`;
     content.innerHTML = '';
 
     if (data.length === 0) {
-        content.innerHTML = '<p style="text-align: center; color: #999; padding: 20px;">No locations found</p>';
+        content.innerHTML = '<p style="text-align: center; color: #999; padding: 20px;">場所が見つかりません</p>';
         return;
     }
 
@@ -393,7 +418,7 @@ function updateSidePanel(data) {
         }
         
         html += `<div class="panel-item-content">`;
-        html += `<div class="panel-item-title">${escapeHtml(item.title || 'Untitled')}</div>`;
+        html += `<div class="panel-item-title">${escapeHtml(item.title || '無題')}</div>`;
         html += `<div class="panel-item-category" style="background-color: ${color}">${escapeHtml(category)}</div>`;
         
         if (item.location) {
@@ -414,6 +439,23 @@ function updateSidePanel(data) {
 
         // Click to fly to location and update panel
         itemEl.addEventListener('click', () => {
+            // In mobile mode, if panel is expanded, minimize it
+            const panel = document.getElementById('side-panel');
+            const panelContent = document.getElementById('panel-content');
+            const isMobile = window.innerWidth <= 768;
+            const wasExpanded = panel.classList.contains('expanded');
+            
+            if (isMobile && wasExpanded) {
+                panel.classList.remove('expanded');
+                panel.style.height = '30%';
+                
+                // Scroll the clicked item into view in the minimized panel
+                setTimeout(() => {
+                    const itemOffsetTop = itemEl.offsetTop;
+                    panelContent.scrollTo({ top: itemOffsetTop, behavior: 'smooth' });
+                }, 350); // Wait for panel transition to complete
+            }
+
             map.flyTo({
                 center: [item.lon, item.lat],
                 zoom: 18,
@@ -466,7 +508,7 @@ function setupEventListeners() {
 function setupMobilePanelDrag() {
     const panel = document.getElementById('side-panel');
     const handle = document.getElementById('panel-drag-handle');
-    const panelHeader = document.getElementById('panel-header');
+    const panelContent = document.getElementById('panel-content');
     
     if (!handle) return;
 
@@ -478,17 +520,24 @@ function setupMobilePanelDrag() {
         if (window.innerWidth > 768) return; // Only on mobile
         
         isDragging = true;
-        startY = e.type.includes('touch') ? e.touches[0].clientY : e.clientY;
+        const touch = e.type.includes('touch') ? e.touches[0] : e;
+        startY = touch.clientY;
         startHeight = panel.offsetHeight;
         
         document.body.style.userSelect = 'none';
         panel.style.transition = 'none';
+        
+        // Prevent default to avoid text selection
+        if (e.type === 'mousedown') {
+            e.preventDefault();
+        }
     };
 
     const doDrag = (e) => {
         if (!isDragging) return;
         
-        const currentY = e.type.includes('touch') ? e.touches[0].clientY : e.clientY;
+        const touch = e.type.includes('touch') ? e.touches[0] : e;
+        const currentY = touch.clientY;
         const deltaY = startY - currentY; // Positive when dragging up
         const newHeight = startHeight + deltaY;
         const windowHeight = window.innerHeight;
@@ -524,14 +573,21 @@ function setupMobilePanelDrag() {
 
     // Mouse events
     handle.addEventListener('mousedown', startDrag);
-    panelHeader.addEventListener('mousedown', startDrag);
     document.addEventListener('mousemove', doDrag);
     document.addEventListener('mouseup', endDrag);
 
-    // Touch events
-    handle.addEventListener('touchstart', startDrag, { passive: true });
-    panelHeader.addEventListener('touchstart', startDrag, { passive: true });
-    document.addEventListener('touchmove', doDrag, { passive: false });
+    // Touch events - use passive: true for touchstart, but capture touchmove if dragging
+    handle.addEventListener('touchstart', (e) => {
+        startDrag(e);
+    }, { passive: true });
+    
+    document.addEventListener('touchmove', (e) => {
+        if (isDragging) {
+            e.preventDefault();
+            doDrag(e);
+        }
+    }, { passive: false });
+    
     document.addEventListener('touchend', endDrag);
 }
 
